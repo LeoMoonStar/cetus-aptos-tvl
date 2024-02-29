@@ -90,43 +90,37 @@ function calculateOtherTokenPrice(Px, xRaw, yRaw, decimalsX, decimalsY) {
     const y = yRaw / Math.pow(10, decimalsY);
     return Px * (x / y);
 }
+//
 function calculatePoolTVL(pool) {
     var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
         const { coin_a_address, coin_b_address, coin_a, coin_b } = pool;
-        const coin_a_value = coin_a["value"];
-        const coin_b_value = coin_b["value"];
-        let coin_a_in_coinPrices = coinPrices[coin_a_address];
-        let coin_b_in_coinPrices = coinPrices[coin_b_address];
-        yield getCoinInfo(coin_a_address);
-        yield getCoinInfo(coin_b_address);
-        const coin_a_amount = parseFloat(coin_a_value) / 10 ** (((_a = allCoins[coin_a_address]) === null || _a === void 0 ? void 0 : _a.decimals) || 0);
-        const coin_b_amount = parseFloat(coin_b_value) / 10 ** (((_b = allCoins[coin_b_address]) === null || _b === void 0 ? void 0 : _b.decimals) || 0);
-        if (coin_a_in_coinPrices == undefined && coin_b_in_coinPrices == undefined) {
-            return 0;
-        }
-        else if (coin_a_in_coinPrices == undefined) {
-            const coin_a_price = calculateOtherTokenPrice(parseFloat(coin_b_in_coinPrices.price), parseFloat(coin_b_value), parseFloat(coin_a_value), allCoins[coin_b_address].decimals, allCoins[coin_a_address].decimals).toString();
-            coinPrices[coin_a_address] = {
-                base_symbol: coin_a_address,
-                quote_symbol: "USD",
-                price: coin_a_price,
-            };
-            coin_a_in_coinPrices = coinPrices[coin_a_address];
-        }
-        else {
-            const coin_b_price = calculateOtherTokenPrice(parseFloat(coin_a_in_coinPrices.price), parseFloat(coin_a_value), parseFloat(coin_b_value), allCoins[coin_a_address].decimals, allCoins[coin_b_address].decimals).toString();
-            coinPrices[coin_b_address] = {
-                base_symbol: coin_b_address,
-                quote_symbol: "USD",
-                price: coin_b_price,
-            };
-            coin_b_in_coinPrices = coinPrices[coin_b_address];
-        }
-        const coin_a_lock_value = parseFloat(coin_a_in_coinPrices.price) * coin_a_amount;
-        const coin_b_lock_value = parseFloat(coin_b_in_coinPrices.price) * coin_b_amount;
-        return (coin_a_lock_value + coin_b_lock_value).toFixed(6);
+        // Fetch coin info if not already cached
+        yield Promise.all([getCoinInfo(coin_a_address), getCoinInfo(coin_b_address)]);
+        // Extract and calculate token amounts with decimals considered
+        const coinAInfo = allCoins[coin_a_address];
+        const coinBInfo = allCoins[coin_b_address];
+        const coinAAmount = parseFloat(coin_a.value) / 10 ** ((coinAInfo === null || coinAInfo === void 0 ? void 0 : coinAInfo.decimals) || 0);
+        const coinBAmount = parseFloat(coin_b.value) / 10 ** ((coinBInfo === null || coinBInfo === void 0 ? void 0 : coinBInfo.decimals) || 0);
+        // Attempt to calculate token prices based on available price info
+        const coinAPrice = ((_a = coinPrices[coin_a_address]) === null || _a === void 0 ? void 0 : _a.price)
+            ? parseFloat(coinPrices[coin_a_address].price)
+            : calculateTokenPriceBasedOnOther(coin_b_address, coin_b.value, coin_a.value, coinBInfo, coinAInfo);
+        const coinBPrice = ((_b = coinPrices[coin_b_address]) === null || _b === void 0 ? void 0 : _b.price)
+            ? parseFloat(coinPrices[coin_b_address].price)
+            : calculateTokenPriceBasedOnOther(coin_a_address, coin_a.value, coin_b.value, coinAInfo, coinBInfo);
+        // Compute TVL values
+        const coinALockValue = coinAPrice * coinAAmount;
+        const coinBLockValue = coinBPrice * coinBAmount;
+        return (coinALockValue + coinBLockValue).toFixed(6);
     });
+}
+// Helper function to calculate the price of a token based on the price of another
+function calculateTokenPriceBasedOnOther(otherCoinAddress, otherCoinValue, targetCoinValue, otherCoinInfo, targetCoinInfo) {
+    if (!coinPrices[otherCoinAddress] || !otherCoinInfo || !targetCoinInfo)
+        return 0;
+    const otherPrice = parseFloat(coinPrices[otherCoinAddress].price);
+    return calculateOtherTokenPrice(otherPrice, parseFloat(otherCoinValue), parseFloat(targetCoinValue), otherCoinInfo.decimals, targetCoinInfo.decimals);
 }
 function callPoolFactory() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -146,14 +140,17 @@ function main() {
         const poolFactoryResponse = yield callPoolFactory();
         const TVLs = [];
         const poolsData = yield Promise.all(poolFactoryResponse.map((pool) => getPools(pool)));
+        let totalTvl = 0;
         for (const poolData of poolsData) {
             const TVL = yield calculatePoolTVL(poolData);
             const result = {
                 pool: poolData.poolAddress,
                 tvl: TVL,
             };
+            totalTvl = totalTvl + parseFloat(TVL);
             TVLs.push(result);
         }
+        console.log("Total TVL for all poos:", totalTvl);
         console.log(TVLs);
     });
 }
